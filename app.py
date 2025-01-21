@@ -51,14 +51,8 @@ def main():
     with col2:
         end_date = st.date_input("To", value=datetime(2025, 12, 31))
 
-    # Company size filter
-    company_sizes = st.sidebar.multiselect(
-        "Company Size",
-        ["Small", "Medium", "Big"]
-    )
-
     # Get unique disease areas for filter
-    disease_query = "SELECT DISTINCT disease_area FROM streamlit_ctmis_view ORDER BY disease_area"
+    disease_query = "SELECT DISTINCT disease_area FROM streamlit_ctmis_view WHERE disease_area IS NOT NULL ORDER BY disease_area"
     diseases_df = execute_query(conn, disease_query)
     if diseases_df is not None:
         selected_diseases = st.sidebar.multiselect(
@@ -69,13 +63,7 @@ def main():
     # Phase filter
     phases = st.sidebar.multiselect(
         "Phases",
-        ["PHASE1", "PHASE2", "PHASE3", "FDA_REVIEW"]
-    )
-
-    # Status filter
-    statuses = st.sidebar.multiselect(
-        "Status",
-        ["RECRUITING", "ACTIVE", "ACTIVE_NOT_RECRUITING", "COMPLETED"]
+        ["PHASE1", "PHASE2", "PHASE3"]
     )
 
     # Market reaction strength filter
@@ -96,38 +84,39 @@ def main():
         sponsor_name = None
 
     if sponsor_name:
-        # Build query conditions
-        conditions = ["LOWER(sponsor_name) LIKE LOWER(%s)"]
+        # Get all trials (both active and completed)
+        active_conditions = [
+            "LOWER(sponsor_name) LIKE LOWER(%s)",
+            "status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING')",
+            "phase IN ('PHASE1', 'PHASE2', 'PHASE3')"
+        ]
+        completed_conditions = [
+            "LOWER(sponsor_name) LIKE LOWER(%s)",
+            "status = 'COMPLETED'"
+        ]
+        
         params = [f"%{sponsor_name}%"]
 
         if start_date and end_date:
-            conditions.append("completion_date BETWEEN %s AND %s")
+            active_conditions.append("completion_date BETWEEN %s AND %s")
+            completed_conditions.append("completion_date BETWEEN %s AND %s")
             params.extend([start_date, end_date])
 
-        if company_sizes:
-            conditions.append("company_size = ANY(%s)")
-            params.append(company_sizes)
-
         if selected_diseases:
-            conditions.append("disease_area = ANY(%s)")
+            active_conditions.append("disease_area = ANY(%s)")
+            completed_conditions.append("disease_area = ANY(%s)")
             params.append(selected_diseases)
 
         if phases:
-            conditions.append("phase = ANY(%s)")
+            active_conditions.append("phase = ANY(%s)")
             params.append(phases)
 
-        if statuses:
-            conditions.append("status = ANY(%s)")
-            params.append(statuses)
-
         if market_reactions:
-            conditions.append("market_reaction_strength = ANY(%s)")
+            active_conditions.append("market_reaction_strength = ANY(%s)")
             params.append(market_reactions)
 
-        where_clause = " AND ".join(conditions)
-
-        # Main query for trials
-        query = f"""
+        # Query for active trials with calculations
+        active_query = f"""
         SELECT 
             nct_id,
             brief_title,
@@ -142,21 +131,60 @@ def main():
             estimated_development_cost/1000000 as development_cost_millions,
             expected_return/1000000 as expected_return_millions
         FROM streamlit_ctmis_view
-        WHERE {where_clause}
+        WHERE {" AND ".join(active_conditions)}
         ORDER BY completion_date DESC
         """
 
-        trials_df = execute_query(conn, query, params)
+        # Query for completed trials (from consolidated table)
+        completed_query = f"""
+        SELECT 
+            nct_id,
+            brief_title,
+            conditions as disease_area,
+            phase,
+            status,
+            completion_date,
+            NULL as phase_success_probability,
+            NULL as likelihood_of_approval,
+            NULL as market_reaction_strength,
+            NULL as market_value_millions,
+            NULL as development_cost_millions,
+            NULL as expected_return_millions
+        FROM consolidated_clinical_trials
+        WHERE {" AND ".join(completed_conditions)}
+        ORDER BY completion_date DESC
+        """
 
-        if trials_df is not None and not trials_df.empty:
+        # Execute queries
+        active_trials_df = execute_query(conn, active_query, params)
+        completed_trials_df = execute_query(conn, completed_query, params[:3])  # Use fewer parameters for completed trials
+
+        if active_trials_df is not None and completed_trials_df is not None:
+            # Combine the dataframes
+            trials_df = pd.concat([active_trials_df, completed_trials_df])
+
             # Format the dataframe
             display_df = trials_df.copy()
             display_df['completion_date'] = pd.to_datetime(display_df['completion_date']).dt.strftime('%Y-%m-%d')
-            display_df['phase_success_probability'] = display_df['phase_success_probability'].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
-            display_df['likelihood_of_approval'] = display_df['likelihood_of_approval'].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
-            display_df['market_value_millions'] = display_df['market_value_millions'].apply(lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
-            display_df['development_cost_millions'] = display_df['development_cost_millions'].apply(lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
-            display_df['expected_return_millions'] = display_df['expected_return_millions'].apply(lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
+            
+            # Format active trial columns
+            mask = display_df['status'].isin(['RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING'])
+            display_df.loc[mask, 'phase_success_probability'] = display_df.loc[mask, 'phase_success_probability'].apply(
+                lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
+            display_df.loc[mask, 'likelihood_of_approval'] = display_df.loc[mask, 'likelihood_of_approval'].apply(
+                lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
+            display_df.loc[mask, 'market_value_millions'] = display_df.loc[mask, 'market_value_millions'].apply(
+                lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
+            display_df.loc[mask, 'development_cost_millions'] = display_df.loc[mask, 'development_cost_millions'].apply(
+                lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
+            display_df.loc[mask, 'expected_return_millions'] = display_df.loc[mask, 'expected_return_millions'].apply(
+                lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
+            
+            # Format completed trial columns
+            mask = ~mask
+            display_df.loc[mask, ['phase_success_probability', 'likelihood_of_approval', 
+                                'market_reaction_strength', 'market_value_millions', 
+                                'development_cost_millions', 'expected_return_millions']] = 'Completed trial'
 
             # Display the trials table
             st.dataframe(
