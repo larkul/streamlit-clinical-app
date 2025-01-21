@@ -16,7 +16,6 @@ def init_connection():
         user=st.secrets["postgresql"]["user"],
         password=st.secrets["postgresql"]["password"]
     )
-
     except Exception as e:
         st.error(f"Failed to connect to database: {e}")
         return None
