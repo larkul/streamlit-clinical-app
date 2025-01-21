@@ -21,25 +21,35 @@ def init_connection():
         st.error(f"Failed to connect to database: {e}")
         return None
 
-def search_sponsor(conn, sponsor_name):
+def execute_query(conn, query, params=None):
+    """
+    Execute a SQL query and return the result as a Pandas DataFrame.
+    """
     try:
-        query = """
-        SELECT * FROM search_sponsor(%s)
-        """
-        return pd.read_sql_query(query, conn, params=[sponsor_name])
+        if conn.closed != 0:  # Connection is closed if `closed` is non-zero
+            st.error("Database connection is closed.")
+            return None
+        return pd.read_sql_query(query, conn, params=params)
     except Exception as e:
         st.error(f"Error executing query: {e}")
         return None
 
+def search_sponsor(conn, sponsor_name):
+    query = """
+    SELECT nct_id, brief_title, phase, status, disease_area, completion_date, 
+           phase_success_probability, value_millions, ctmis_score, return_millions
+    FROM search_sponsor(%s)
+    """
+    return execute_query(conn, query, params=[sponsor_name])
+
 def get_sponsor_summary(conn, sponsor_name):
-    try:
-        query = """
-        SELECT * FROM get_sponsor_summary(%s)
-        """
-        return pd.read_sql_query(query, conn, params=[sponsor_name])
-    except Exception as e:
-        st.error(f"Error executing query: {e}")
-        return None
+    query = """
+    SELECT total_trials, active_trials, unique_diseases, biomarker_trial_count, 
+           avg_success_probability, avg_market_reaction, 
+           portfolio_value_millions, portfolio_cost_millions, portfolio_return_millions
+    FROM get_sponsor_summary(%s)
+    """
+    return execute_query(conn, query, params=[sponsor_name])
 
 def main():
     st.title("Clinical Trials Sponsor Analysis")
@@ -55,7 +65,7 @@ def main():
     sponsor_name = st.text_input("Enter Sponsor Name to Search:")
     
     if sponsor_name:
-        conn = init_connection()  # Corrected function call
+        conn = init_connection()  # Cached connection
         if conn:
             # Get sponsor summary
             summary_df = get_sponsor_summary(conn, sponsor_name)
@@ -128,8 +138,6 @@ def main():
                     file_name=f"{sponsor_name}_trials.csv",
                     mime="text/csv"
                 )
-            
-            conn.close()
 
 if __name__ == "__main__":
     main()
