@@ -55,7 +55,7 @@ def main():
     sponsor_name = st.text_input("Enter Sponsor Name to Search:")
     
     if sponsor_name:
-        conn = create_connection()
+        conn = init_connection()  # Corrected function call
         if conn:
             # Get sponsor summary
             summary_df = get_sponsor_summary(conn, sponsor_name)
