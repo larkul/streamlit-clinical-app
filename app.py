@@ -83,34 +83,54 @@ def main():
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.metric("Total Trials", summary_df['total_trials'].iloc[0])
-                    st.metric("Active Trials", summary_df['active_trials'].iloc[0])
+                    total_trials = summary_df['total_trials'].iloc[0]
+                    active_trials = summary_df['active_trials'].iloc[0]
+                    st.metric("Total Trials", total_trials if total_trials else "N/A")
+                    st.metric("Active Trials", active_trials if active_trials else "N/A")
                 
                 with col2:
-                    st.metric("Unique Diseases", summary_df['unique_diseases'].iloc[0])
-                    st.metric("Biomarker Trials", summary_df['biomarker_trial_count'].iloc[0])
+                    unique_diseases = summary_df['unique_diseases'].iloc[0]
+                    biomarker_trials = summary_df['biomarker_trial_count'].iloc[0]
+                    st.metric("Unique Diseases", unique_diseases if unique_diseases else "N/A")
+                    st.metric("Biomarker Trials", biomarker_trials if biomarker_trials else "N/A")
                 
                 with col3:
-                    st.metric("Avg Success Probability", 
-                             f"{summary_df['avg_success_probability'].iloc[0]:.2%}")
-                    st.metric("Avg Market Reaction", 
-                             f"{summary_df['avg_market_reaction'].iloc[0]:.1f}/10")
+                    avg_success_probability = summary_df['avg_success_probability'].iloc[0]
+                    avg_market_reaction = summary_df['avg_market_reaction'].iloc[0]
+                    st.metric(
+                        "Avg Success Probability",
+                        f"{avg_success_probability:.2%}" if pd.notnull(avg_success_probability) else "N/A"
+                    )
+                    st.metric(
+                        "Avg Market Reaction",
+                        f"{avg_market_reaction:.1f}/10" if pd.notnull(avg_market_reaction) else "N/A"
+                    )
 
                 # Financial metrics
                 st.subheader("Portfolio Financial Analysis")
                 fin_col1, fin_col2, fin_col3 = st.columns(3)
                 
                 with fin_col1:
-                    st.metric("Portfolio Value", 
-                             f"${summary_df['portfolio_value_millions'].iloc[0]:,.1f}M")
+                    portfolio_value = summary_df['portfolio_value_millions'].iloc[0]
+                    st.metric(
+                        "Portfolio Value",
+                        f"${portfolio_value:,.1f}M" if pd.notnull(portfolio_value) else "N/A"
+                    )
                 
                 with fin_col2:
-                    st.metric("Development Cost", 
-                             f"${summary_df['portfolio_cost_millions'].iloc[0]:,.1f}M")
+                    development_cost = summary_df['portfolio_cost_millions'].iloc[0]
+                    st.metric(
+                        "Development Cost",
+                        f"${development_cost:,.1f}M" if pd.notnull(development_cost) else "N/A"
+                    )
                 
                 with fin_col3:
-                    st.metric("Expected Return", 
-                             f"${summary_df['portfolio_return_millions'].iloc[0]:,.1f}M")
+                    expected_return = summary_df['portfolio_return_millions'].iloc[0]
+                    st.metric(
+                        "Expected Return",
+                        f"${expected_return:,.1f}M" if pd.notnull(expected_return) else "N/A"
+                    )
+
 
             # Get detailed trial information
             trials_df = search_sponsor(conn, sponsor_name)
