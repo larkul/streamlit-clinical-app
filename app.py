@@ -1,172 +1,244 @@
 import streamlit as st
 import pandas as pd
-import psycopg2
 import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+import psycopg2
 
 # Configure page
-st.set_page_config(page_title="Clinical Trial Outcome Prediction", layout="wide")
+st.set_page_config(page_title="Clinical Trial Analysis Dashboard", layout="wide")
 
-# Database connection using st.secrets
+# Database connection
 @st.cache_resource
 def init_connection():
-    """
-    Establish a new database connection.
-    """
-    try:
-        return psycopg2.connect(
-            host=st.secrets["postgresql"]["host"],
-            port=st.secrets["postgresql"]["port"],
-            database=st.secrets["postgresql"]["database"],
-            user=st.secrets["postgresql"]["user"],
-            password=st.secrets["postgresql"]["password"]
-        )
-    except Exception as e:
-        st.error(f"Failed to connect to database: {e}")
-        return None
-
-def ensure_connection(conn):
-    """
-    Ensure the connection is open. If closed, re-establish it.
-    """
-    if conn.closed != 0:  # Connection is closed if `closed` is non-zero
-        conn = init_connection()
-    return conn
+    return psycopg2.connect(
+        host=st.secrets["postgresql"]["host"],
+        port=st.secrets["postgresql"]["port"],
+        database=st.secrets["postgresql"]["database"],
+        user=st.secrets["postgresql"]["user"],
+        password=st.secrets["postgresql"]["password"]
+    )
 
 def execute_query(conn, query, params=None):
-    """
-    Execute a SQL query and return the result as a Pandas DataFrame.
-    """
     try:
-        conn = ensure_connection(conn)
         return pd.read_sql_query(query, conn, params=params)
     except Exception as e:
         st.error(f"Error executing query: {e}")
         return None
 
-def search_sponsor(conn, sponsor_name):
-    query = """
-    SELECT nct_id, brief_title, phase, status, disease_area, completion_date, 
-           phase_success_probability, value_millions, ctmis_score, return_millions
-    FROM search_sponsor(%s)
-    """
-    return execute_query(conn, query, params=[sponsor_name])
-
-def get_sponsor_summary(conn, sponsor_name):
-    query = """
-    SELECT total_trials, active_trials, unique_diseases, biomarker_trial_count, 
-           avg_success_probability, avg_market_reaction, 
-           portfolio_value_millions, portfolio_cost_millions, portfolio_return_millions
-    FROM get_sponsor_summary(%s)
-    """
-    return execute_query(conn, query, params=[sponsor_name])
-
 def main():
-    st.title("Clinical Trials Sponsor Analysis")
+    st.title("Clinical Trials Analysis Dashboard")
     
-    # Sidebar for filters and information
-    st.sidebar.header("About")
-    st.sidebar.info("""
-    This application allows you to analyze clinical trial sponsors and their 
-    probability of success, market reactions, and portfolio analysis.
-    """)
-
-    # Main search interface
-    sponsor_name = st.text_input("Enter Sponsor Name to Search:")
+    # Sidebar filters
+    st.sidebar.header("Filters")
+    
+    # Initialize connection
+    conn = init_connection()
+    
+    # Get unique disease areas for filter
+    disease_areas = execute_query(conn, "SELECT DISTINCT area_name FROM disease_areas ORDER BY area_name")
+    if disease_areas is not None:
+        selected_diseases = st.sidebar.multiselect(
+            "Select Disease Areas",
+            options=disease_areas['area_name'].tolist(),
+        )
+    
+    # Date range filter
+    years = execute_query(conn, "SELECT DISTINCT EXTRACT(YEAR FROM completion_date)::int as year FROM consolidated_clinical_trials ORDER BY year DESC")
+    if years is not None:
+        min_year = years['year'].min()
+        max_year = years['year'].max()
+        selected_years = st.sidebar.slider(
+            "Select Year Range",
+            min_value=min_year,
+            max_value=max_year,
+            value=(min_year, max_year)
+        )
+    
+    # Phase filter
+    phases = st.sidebar.multiselect(
+        "Select Phases",
+        ["PHASE1", "PHASE2", "PHASE3", "FDA_REVIEW"]
+    )
+    
+    # Build base query with filters
+    base_query_conditions = []
+    params = []
+    
+    if selected_diseases:
+        base_query_conditions.append("disease_area = ANY(%s)")
+        params.append(selected_diseases)
+    
+    if selected_years:
+        base_query_conditions.append("EXTRACT(YEAR FROM completion_date) BETWEEN %s AND %s")
+        params.extend(selected_years)
+    
+    if phases:
+        base_query_conditions.append("phase = ANY(%s)")
+        params.append(phases)
+    
+    where_clause = " AND ".join(base_query_conditions) if base_query_conditions else "1=1"
+    
+    # Get sponsor name from user
+    sponsor_name = st.text_input("Enter Sponsor Name:")
     
     if sponsor_name:
-        conn = init_connection()  # Cached connection
-        if conn:
-            # Get sponsor summary
-            summary_df = get_sponsor_summary(conn, sponsor_name)
-            if summary_df is not None and not summary_df.empty:
-                st.subheader("Sponsor Portfolio Summary")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    total_trials = summary_df['total_trials'].iloc[0]
-                    active_trials = summary_df['active_trials'].iloc[0]
-                    st.metric("Total Trials", total_trials if total_trials else "N/A")
-                    st.metric("Active Trials", active_trials if active_trials else "N/A")
-                
-                with col2:
-                    unique_diseases = summary_df['unique_diseases'].iloc[0]
-                    biomarker_trials = summary_df['biomarker_trial_count'].iloc[0]
-                    st.metric("Unique Diseases", unique_diseases if unique_diseases else "N/A")
-                    st.metric("Biomarker Trials", biomarker_trials if biomarker_trials else "N/A")
-                
-                with col3:
-                    avg_success_probability = summary_df['avg_success_probability'].iloc[0]
-                    avg_market_reaction = summary_df['avg_market_reaction'].iloc[0]
-                    st.metric(
-                        "Avg Success Probability",
-                        f"{avg_success_probability:.2%}" if pd.notnull(avg_success_probability) else "N/A"
-                    )
-                    st.metric(
-                        "Avg Market Reaction",
-                        f"{avg_market_reaction:.1f}/10" if pd.notnull(avg_market_reaction) else "N/A"
-                    )
-
-                # Financial metrics
-                st.subheader("Portfolio Financial Analysis")
-                fin_col1, fin_col2, fin_col3 = st.columns(3)
-                
-                with fin_col1:
-                    portfolio_value = summary_df['portfolio_value_millions'].iloc[0]
-                    st.metric(
-                        "Portfolio Value",
-                        f"${portfolio_value:,.1f}M" if pd.notnull(portfolio_value) else "N/A"
-                    )
-                
-                with fin_col2:
-                    development_cost = summary_df['portfolio_cost_millions'].iloc[0]
-                    st.metric(
-                        "Development Cost",
-                        f"${development_cost:,.1f}M" if pd.notnull(development_cost) else "N/A"
-                    )
-                
-                with fin_col3:
-                    expected_return = summary_df['portfolio_return_millions'].iloc[0]
-                    st.metric(
-                        "Expected Return",
-                        f"${expected_return:,.1f}M" if pd.notnull(expected_return) else "N/A"
-                    )
-
-
-            # Get detailed trial information
-            trials_df = search_sponsor(conn, sponsor_name)
-            if trials_df is not None and not trials_df.empty:
-                st.subheader("Clinical Trials Details")
-                
-                # Create tabs for different views
-                tab1, tab2, tab3 = st.tabs(["Trial List", "Success Analysis", "Market Analysis"])
-                
-                with tab1:
-                    st.dataframe(trials_df[['nct_id', 'brief_title', 'phase', 
-                                          'status', 'disease_area', 'completion_date']])
-                
-                with tab2:
-                    # Success probability by phase
-                    fig1 = px.bar(trials_df, x='phase', y='phase_success_probability',
-                                 title='Success Probability by Phase',
-                                 labels={'phase_success_probability': 'Success Probability'})
-                    st.plotly_chart(fig1)
-                
-                with tab3:
-                    # Market reaction analysis
-                    fig2 = px.scatter(trials_df, x='value_millions', y='ctmis_score',
-                                    color='phase', size='return_millions',
-                                    hover_data=['brief_title'],
-                                    title='Market Value vs CTMIS Score')
-                    st.plotly_chart(fig2)
-
-                # Download option
-                csv = trials_df.to_csv(index=False)
-                st.download_button(
-                    label="Download Trial Data as CSV",
-                    data=csv,
-                    file_name=f"{sponsor_name}_trials.csv",
-                    mime="text/csv"
+        # Add sponsor filter to where clause
+        where_clause = f"({where_clause}) AND LOWER(sponsor_name) LIKE LOWER(%s)"
+        params.append(f"%{sponsor_name}%")
+        
+        # Get overall metrics
+        metrics_query = f"""
+        SELECT 
+            COUNT(*) as total_trials,
+            COUNT(CASE WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN 1 END) as active_trials,
+            COUNT(DISTINCT disease_area) as unique_diseases,
+            COUNT(DISTINCT phase) as unique_phases
+        FROM consolidated_clinical_trials
+        WHERE {where_clause}
+        """
+        
+        metrics_df = execute_query(conn, metrics_query, params)
+        
+        if metrics_df is not None and not metrics_df.empty:
+            # Display metrics in columns
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Trials", metrics_df['total_trials'].iloc[0])
+            with col2:
+                st.metric("Active Trials", metrics_df['active_trials'].iloc[0])
+            with col3:
+                st.metric("Disease Areas", metrics_df['unique_diseases'].iloc[0])
+            with col4:
+                st.metric("Trial Phases", metrics_df['unique_phases'].iloc[0])
+        
+        # Get trials by disease area and status
+        disease_query = f"""
+        SELECT 
+            disease_area,
+            status,
+            COUNT(*) as trial_count
+        FROM consolidated_clinical_trials
+        WHERE {where_clause}
+        GROUP BY disease_area, status
+        ORDER BY disease_area, status
+        """
+        
+        disease_df = execute_query(conn, disease_query, params)
+        
+        if disease_df is not None and not disease_df.empty:
+            # Create stacked bar chart
+            fig_disease = px.bar(
+                disease_df,
+                x='disease_area',
+                y='trial_count',
+                color='status',
+                title='Trials by Disease Area and Status',
+                labels={'disease_area': 'Disease Area', 'trial_count': 'Number of Trials'}
+            )
+            st.plotly_chart(fig_disease, use_container_width=True)
+        
+        # Get trials by phase
+        phase_query = f"""
+        SELECT 
+            phase,
+            COUNT(*) as trial_count
+        FROM consolidated_clinical_trials
+        WHERE {where_clause}
+        GROUP BY phase
+        ORDER BY phase
+        """
+        
+        phase_df = execute_query(conn, phase_query, params)
+        
+        if phase_df is not None and not phase_df.empty:
+            fig_phase = px.bar(
+                phase_df,
+                x='phase',
+                y='trial_count',
+                title='Trials by Phase',
+                labels={'phase': 'Phase', 'trial_count': 'Number of Trials'}
+            )
+            st.plotly_chart(fig_phase, use_container_width=True)
+        
+        # Create tabs for detailed analysis
+        tab1, tab2, tab3 = st.tabs(["Completed Trials", "Active Trials Analysis", "Market Analysis"])
+        
+        with tab1:
+            completed_query = f"""
+            SELECT 
+                nct_id,
+                brief_title,
+                phase,
+                disease_area,
+                completion_date
+            FROM consolidated_clinical_trials
+            WHERE {where_clause} AND status = 'COMPLETED'
+            ORDER BY completion_date DESC
+            """
+            
+            completed_df = execute_query(conn, completed_query, params)
+            if completed_df is not None:
+                st.dataframe(completed_df)
+        
+        with tab2:
+            active_query = f"""
+            SELECT 
+                nct_id,
+                brief_title,
+                phase,
+                disease_area,
+                phase_success_probability,
+                likelihood_of_approval
+            FROM streamlit_ctmis_view
+            WHERE {where_clause} AND status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING')
+            """
+            
+            active_df = execute_query(conn, active_query, params)
+            if active_df is not None:
+                # Success probability by phase
+                fig_success = px.scatter(
+                    active_df,
+                    x='phase',
+                    y='phase_success_probability',
+                    color='disease_area',
+                    title='Success Probability by Phase',
+                    labels={'phase_success_probability': 'Success Probability'}
                 )
+                st.plotly_chart(fig_success, use_container_width=True)
+        
+        with tab3:
+            market_query = f"""
+            SELECT 
+                nct_id,
+                brief_title,
+                phase,
+                disease_area,
+                ctmis_score,
+                estimated_market_value/1000000 as value_millions,
+                expected_return/1000000 as return_millions
+            FROM streamlit_ctmis_view
+            WHERE {where_clause}
+            """
+            
+            market_df = execute_query(conn, market_query, params)
+            if market_df is not None:
+                # Market value analysis
+                fig_market = px.scatter(
+                    market_df,
+                    x='value_millions',
+                    y='ctmis_score',
+                    color='phase',
+                    size='return_millions',
+                    hover_data=['brief_title'],
+                    title='Market Value vs CTMIS Score',
+                    labels={
+                        'value_millions': 'Estimated Market Value (Millions)',
+                        'ctmis_score': 'CTMIS Score',
+                        'return_millions': 'Expected Return (Millions)'
+                    }
+                )
+                st.plotly_chart(fig_market, use_container_width=True)
 
 if __name__ == "__main__":
     main()
