@@ -9,6 +9,9 @@ st.set_page_config(page_title="Clinical Trial Outcome Prediction", layout="wide"
 # Database connection using st.secrets
 @st.cache_resource
 def init_connection():
+    """
+    Establish a new database connection.
+    """
     try:
         return psycopg2.connect(
             host=st.secrets["postgresql"]["host"],
@@ -21,14 +24,20 @@ def init_connection():
         st.error(f"Failed to connect to database: {e}")
         return None
 
+def ensure_connection(conn):
+    """
+    Ensure the connection is open. If closed, re-establish it.
+    """
+    if conn.closed != 0:  # Connection is closed if `closed` is non-zero
+        conn = init_connection()
+    return conn
+
 def execute_query(conn, query, params=None):
     """
     Execute a SQL query and return the result as a Pandas DataFrame.
     """
     try:
-        if conn.closed != 0:  # Connection is closed if `closed` is non-zero
-            st.error("Database connection is closed.")
-            return None
+        conn = ensure_connection(conn)
         return pd.read_sql_query(query, conn, params=params)
     except Exception as e:
         st.error(f"Error executing query: {e}")
