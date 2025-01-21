@@ -23,4 +23,4 @@ try:
 except Exception as e:
     st.error(f"Unable to connect to the database: {str(e)}")
 
-st.title("Clinical Data Analysis")
+st.title("Clinical Trial Outcome Prediction")
