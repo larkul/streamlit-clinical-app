@@ -4,7 +4,7 @@ import psycopg2
 import plotly.express as px
 
 # Configure page
-st.set_page_config(page_title="Clinical Trial Analysis", layout="wide")
+st.set_page_config(page_title="Clinical Trial Outcome Predictor", layout="wide")
 
 # Database connection using st.secrets
 @st.cache_resource
