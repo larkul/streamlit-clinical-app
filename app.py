@@ -9,13 +9,14 @@ st.set_page_config(page_title="Clinical Trial Outcome Prediction", layout="wide"
 # Database connection using st.secrets
 @st.cache_resource
 def init_connection():
-    return psycopg2.connect(
-        host=st.secrets["postgresql"]["host"],
-        port=st.secrets["postgresql"]["port"],
-        database=st.secrets["postgresql"]["database"],
-        user=st.secrets["postgresql"]["user"],
-        password=st.secrets["postgresql"]["password"]
-    )
+    try:
+        return psycopg2.connect(
+            host=st.secrets["postgresql"]["host"],
+            port=st.secrets["postgresql"]["port"],
+            database=st.secrets["postgresql"]["database"],
+            user=st.secrets["postgresql"]["user"],
+            password=st.secrets["postgresql"]["password"]
+        )
     except Exception as e:
         st.error(f"Failed to connect to database: {e}")
         return None
