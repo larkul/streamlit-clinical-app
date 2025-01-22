@@ -1,4 +1,7 @@
-.streamlit/secrets.toml
-__pycache__/
-*.pyc
+# Local changes
 .env
+Dockerfile
+# Remote changes
+*.log
+node_modules/
+
