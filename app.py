@@ -18,7 +18,11 @@ def init_connection():
 
 def execute_query(conn, query, params=None):
    try:
-       return pd.read_sql_query(query, conn, params=params)
+       cur = conn.cursor()
+       cur.execute(query, params)
+       columns = [desc[0] for desc in cur.description]
+       results = cur.fetchall()
+       return pd.DataFrame([dict(row) for row in results])
    except Exception as e:
        st.error(f"Error executing query: {e}")
        return None
