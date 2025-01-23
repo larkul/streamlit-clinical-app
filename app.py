@@ -33,23 +33,18 @@ def execute_query(conn, query, params=None):
 
 def get_sponsor_overview(conn):
     query = """
-    SELECT 
+   SELECT 
     COUNT(*) as total_trials,
     COUNT(CASE WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN 1 END) as active_trials,
-    JSONB_OBJECT_AGG(phase, phase_count) as trials_per_phase,
+    JSONB_OBJECT_AGG(phase, COUNT(*)) FILTER (WHERE phase IS NOT NULL) as trials_per_phase,
     SUM(CASE 
         WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') 
         THEN COALESCE(estimated_market_value, 0) 
         ELSE 0 
     END)/1000000 as portfolio_value_millions
-FROM (
-    SELECT 
-        phase,
-        COUNT(*) as phase_count
-    FROM streamlit_ctmis_view
-    GROUP BY phase
-) as phase_data
-WHERE completion_date BETWEEN %s AND %s;
+FROM streamlit_ctmis_view
+WHERE completion_date BETWEEN %s AND %s
+GROUP BY phase;
     """
     start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
     end_date = st.sidebar.date_input("End Date", datetime(2025, 12, 31))
