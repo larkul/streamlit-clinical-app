@@ -35,26 +35,25 @@ def get_sponsor_details(conn, sponsor_name, filters):
     query = """
     SELECT 
         nct_id,
-        sponsor_name,
+        brief_title,
         phase,
         status,
-        disease_area,
+        determine_disease_area(conditions) as disease_area,
         completion_date,
         phase_success_probability as probability_of_success,
         likelihood_of_approval,
-        market_reaction_level as market_reaction, -- Use the precomputed level
+        market_reaction_strength as market_reaction,
         estimated_market_value/1000000 as market_value_millions,
         estimated_development_cost/1000000 as development_cost_millions,
-        expected_return/1000000 as discount
-    FROM streamlit_ctmis_view
+        expected_return/1000000 as expected_return_millions
+    FROM consolidated_clinical_trials
     WHERE LOWER(sponsor_name) LIKE LOWER(%s)
     """
 
-    # Apply additional filters
     params = [f'%{sponsor_name}%']
 
     if filters.get("disease_area"):
-        query += " AND disease_area = %s"
+        query += " AND determine_disease_area(conditions) = %s"
         params.append(filters["disease_area"])
 
     if filters.get("phase"):
@@ -67,13 +66,18 @@ def get_sponsor_details(conn, sponsor_name, filters):
 
     if filters.get("market_reaction"):
         query += " AND market_reaction_level = %s"
-        params.append(filters["market_reaction"])  # Directly match Weak/Moderate/Strong
+        params.append(filters["market_reaction"])
 
     if filters.get("has_biomarker"):
-        query += " AND has_biomarker = TRUE"
+        query += """ AND has_biomarker_indicators(
+            eligibility_criteria,
+            outcome_measures,
+            design_info,
+            biospec_retention,
+            biospec_description
+        ) = TRUE"""
 
-    query += " ORDER BY completion_date ASC;"
-
+    query += " ORDER BY completion_date DESC;"
     return execute_query(conn, query, params)
 
 def main():
