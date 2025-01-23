@@ -34,6 +34,7 @@ def execute_query(conn, query, params=None):
 def get_sponsor_details(conn, sponsor_name, filters):
     query = """
     SELECT 
+        nct_id,
         sponsor_name,
         phase,
         status,
@@ -41,11 +42,10 @@ def get_sponsor_details(conn, sponsor_name, filters):
         completion_date,
         phase_success_probability as probability_of_success,
         likelihood_of_approval,
-        market_reaction_strength as market_reaction,
+        market_reaction_level as market_reaction, -- Use the precomputed level
         estimated_market_value/1000000 as market_value_millions,
         estimated_development_cost/1000000 as development_cost_millions,
-        expected_return/1000000 as discount,
-        nct_id
+        expected_return/1000000 as discount
     FROM streamlit_ctmis_view
     WHERE LOWER(sponsor_name) LIKE LOWER(%s)
     """
@@ -66,8 +66,8 @@ def get_sponsor_details(conn, sponsor_name, filters):
         params.append(filters["status"])
 
     if filters.get("market_reaction"):
-        query += " AND market_reaction_strength = %s"
-        params.append(filters["market_reaction"])
+        query += " AND market_reaction_level = %s"
+        params.append(filters["market_reaction"])  # Directly match Weak/Moderate/Strong
 
     if filters.get("has_biomarker"):
         query += " AND has_biomarker = TRUE"
@@ -75,7 +75,6 @@ def get_sponsor_details(conn, sponsor_name, filters):
     query += " ORDER BY completion_date ASC;"
 
     return execute_query(conn, query, params)
-
 
 def main():
     st.title("Clinical Trials Analysis Dashboard")
