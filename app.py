@@ -94,7 +94,7 @@ def main():
         "disease_area": disease_area if disease_area else None,
         "phase": phase if phase else None,
         "status": status if status else None,
-        "market_reaction": market_reaction if market_reaction > 0 else None,
+        "market_reaction": market_reaction if market_reaction else None, 
         "has_biomarker": has_biomarker
     }
 
