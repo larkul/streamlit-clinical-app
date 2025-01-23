@@ -36,7 +36,7 @@ def get_sponsor_overview(conn):
    SELECT 
     COUNT(*) as total_trials,
     COUNT(CASE WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN 1 END) as active_trials,
-    JSONB_OBJECT_AGG(phase, COUNT(*)) FILTER (WHERE phase IS NOT NULL) as trials_per_phase,
+    JSONB_OBJECT_AGG(phase, COUNT(*)) as trials_per_phase,
     SUM(CASE 
         WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') 
         THEN COALESCE(estimated_market_value, 0) 
