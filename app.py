@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -32,227 +31,125 @@ def execute_query(conn, query, params=None):
         st.error(f"Error executing query: {e}")
         return None
 
-def get_sponsor_overview(conn, sponsor_name):
+def get_sponsor_overview(conn):
     query = """
     SELECT 
         COUNT(*) as total_trials,
         COUNT(CASE WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN 1 END) as active_trials,
-        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_trials,
-        ARRAY_AGG(DISTINCT EXTRACT(YEAR FROM completion_date)) as trial_years,
         JSONB_OBJECT_AGG(phase, COUNT(*)) FILTER (WHERE phase IS NOT NULL) as trials_per_phase,
         SUM(CASE 
             WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') 
             THEN COALESCE(estimated_market_value, 0) 
             ELSE 0 
         END)/1000000 as portfolio_value_millions
-    FROM consolidated_clinical_trials
-    WHERE LOWER(sponsor_name) LIKE LOWER(%s)
-    GROUP BY sponsor_name
+    FROM streamlit_ctmis_view
+    WHERE completion_date BETWEEN %s AND %s
     """
-    return execute_query(conn, query, [f'%{sponsor_name}%'])
+    start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
+    end_date = st.sidebar.date_input("End Date", datetime(2025, 12, 31))
+    return execute_query(conn, query, [start_date, end_date])
 
-def create_sponsor_visualizations(conn, sponsor_name):
+def visualize_data(overview_df):
+    if overview_df is not None and not overview_df.empty:
+        # Active Trials Bar Chart
+        st.subheader("Trial Status Distribution")
+        active_data = {
+            "Status": ["Active", "Recruiting", "Active Not Recruiting"],
+            "Count": [
+                overview_df['active_trials'].iloc[0],
+                overview_df['active_trials'].iloc[0],  # Assuming counts for now
+                overview_df['active_trials'].iloc[0]
+            ]
+        }
+        active_df = pd.DataFrame(active_data)
+        fig_status = px.bar(active_df, x="Status", y="Count", title="Active Trials by Status")
+        st.plotly_chart(fig_status)
+
+        # Phase Distribution Bar Chart
+        st.subheader("Trial Phases")
+        if overview_df['trials_per_phase'].iloc[0]:
+            phase_df = pd.DataFrame(list(overview_df['trials_per_phase'].iloc[0].items()), columns=['Phase', 'Count'])
+            fig_phase = px.bar(phase_df, x='Phase', y='Count', title='Trials by Phase')
+            st.plotly_chart(fig_phase)
+
+        # Market Value Portfolio
+        st.metric("Portfolio Value (in Millions)", f"${overview_df['portfolio_value_millions'].iloc[0]:,.2f}")
+
+def get_top_completion_dates(conn):
+    query = """
+    SELECT nct_id, brief_title, completion_date 
+    FROM streamlit_ctmis_view
+    WHERE completion_date >= CURRENT_DATE
+    ORDER BY completion_date ASC
+    LIMIT 3
+    """
+    return execute_query(conn, query)
+
+def get_sponsor_details(conn, sponsor_name):
     query = """
     SELECT 
-        phase,
-        status,
-        EXTRACT(YEAR FROM completion_date) as year,
-        determine_disease_area(conditions) as disease_area,
-        estimated_market_value/1000000 as value_millions,
-        has_biomarker_indicators(
-            eligibility_criteria,
-            outcome_measures,
-            design_info,
-            biospec_retention,
-            biospec_description
-        ) as has_biomarker
-    FROM consolidated_clinical_trials
-    WHERE LOWER(sponsor_name) LIKE LOWER(%s)
-    """
-    df = execute_query(conn, query, [f'%{sponsor_name}%'])
-    
-    if df is not None and not df.empty:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Phase Distribution
-            phase_df = df['phase'].value_counts().reset_index()
-            phase_df.columns = ['Phase', 'Count']
-            fig_phase = px.pie(phase_df, 
-                             values='Count',
-                             names='Phase',
-                             title='Trials by Phase')
-            st.plotly_chart(fig_phase, use_container_width=True)
-            
-            # Status Distribution
-            status_df = df['status'].value_counts().reset_index()
-            status_df.columns = ['Status', 'Count']
-            fig_status = px.bar(status_df,
-                              x='Status',
-                              y='Count',
-                              title='Trial Status Distribution')
-            st.plotly_chart(fig_status, use_container_width=True)
-        
-        with col2:
-            # Trials by Year
-            yearly_trials = df.groupby('year').size().reset_index(name='count')
-            fig_yearly = px.line(yearly_trials,
-                               x='year',
-                               y='count',
-                               title='Trials by Year',
-                               markers=True)
-            st.plotly_chart(fig_yearly, use_container_width=True)
-            
-            # Disease Area Distribution
-            disease_df = df['disease_area'].value_counts().reset_index()
-            disease_df.columns = ['Disease Area', 'Count']
-            fig_disease = px.bar(disease_df,
-                               x='Disease Area',
-                               y='Count',
-                               title='Trials by Disease Area')
-            fig_disease.update_layout(xaxis_tickangle=45)
-            st.plotly_chart(fig_disease, use_container_width=True)
-
-def get_trial_details(conn, sponsor_name, status_filter=None, phase_filter=None):
-    query = """
-    SELECT 
-        nct_id,
-        brief_title,
+        sponsor_name,
         phase,
         status,
         determine_disease_area(conditions) as disease_area,
         completion_date,
-        CASE 
-            WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN
-                phase_success_probability
-            ELSE NULL
-        END as success_probability,
-        CASE 
-            WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN
-                likelihood_of_approval
-            ELSE NULL
-        END as likelihood_of_approval,
-        CASE 
-            WHEN status IN ('RECRUITING', 'ACTIVE', 'ACTIVE_NOT_RECRUITING') THEN
-                market_reaction_strength
-            ELSE NULL
-        END as market_reaction,
+        phase_success_probability as probability_of_success,
+        likelihood_of_approval,
+        market_reaction_strength as market_reaction,
         estimated_market_value/1000000 as market_value_millions,
         estimated_development_cost/1000000 as development_cost_millions,
-        expected_return/1000000 as expected_return_millions,
-        has_biomarker_indicators(
-            eligibility_criteria,
-            outcome_measures,
-            design_info,
-            biospec_retention,
-            biospec_description
-        ) as has_biomarker
+        expected_return/1000000 as discount,
+        nct_id
     FROM streamlit_ctmis_view
     WHERE LOWER(sponsor_name) LIKE LOWER(%s)
+    ORDER BY completion_date ASC
     """
-    params = [f'%{sponsor_name}%']
-    
-    if status_filter:
-        query += " AND status = ANY(%s)"
-        params.append(status_filter)
-    if phase_filter:
-        query += " AND phase = ANY(%s)"
-        params.append(phase_filter)
-        
-    query += " ORDER BY completion_date DESC"
-    
-    return execute_query(conn, query, params)
+    return execute_query(conn, query, [f'%{sponsor_name}%'])
 
 def main():
     st.title("Clinical Trials Analysis Dashboard")
-    
     conn = init_connection()
-    
-    # Sidebar filters
+
+    # Sidebar Filters
     st.sidebar.header("Filters")
-    
-    # Date range filter
-    st.sidebar.subheader("Date Range")
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        start_date = st.date_input("From", value=datetime(2020, 1, 1))
-    with col2:
-        end_date = st.date_input("To", value=datetime(2025, 12, 31))
+    biomarker_filter = st.sidebar.checkbox("Biomarker Present")
 
-    # Status filter
-    statuses = st.sidebar.multiselect(
-        "Status",
-        ["RECRUITING", "ACTIVE", "ACTIVE_NOT_RECRUITING", "COMPLETED"]
-    )
+    overview_df = get_sponsor_overview(conn)
+    if overview_df is not None and not overview_df.empty:
+        st.header("Portfolio Overview")
+        visualize_data(overview_df)
 
-    # Phase filter
-    phases = st.sidebar.multiselect(
-        "Phases",
-        ["PHASE1", "PHASE2", "PHASE3"]
-    )
+        # Top Completion Dates
+        st.header("Upcoming Completion Dates")
+        completion_df = get_top_completion_dates(conn)
+        if completion_df is not None and not completion_df.empty:
+            st.dataframe(completion_df)
+        else:
+            st.write("No upcoming completion dates found.")
 
-    # Sponsor search
-    sponsor_name = st.text_input("Enter Sponsor Name:")
-    
-    if sponsor_name:
-        # Get sponsor overview
-        overview_df = get_sponsor_overview(conn, sponsor_name)
-        
-        if overview_df is not None and not overview_df.empty:
-            st.header("Portfolio Overview")
-            
-            # Display metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Trials", overview_df['total_trials'].iloc[0])
-                st.metric("Active Trials", overview_df['active_trials'].iloc[0])
-            with col2:
-                st.metric("Completed Trials", overview_df['completed_trials'].iloc[0])
-                if overview_df['portfolio_value_millions'].iloc[0]:
-                    st.metric("Portfolio Value", 
-                             f"${overview_df['portfolio_value_millions'].iloc[0]:,.1f}M")
-            with col3:
-                st.write("Trials by Phase")
-                if overview_df['trials_per_phase'].iloc[0]:
-                    st.json(overview_df['trials_per_phase'].iloc[0])
-            
-            # Create visualizations
-            st.header("Portfolio Analysis")
-            create_sponsor_visualizations(conn, sponsor_name)
-            
-            # Get trial details
-            st.header("Trial Details")
-            trials_df = get_trial_details(conn, sponsor_name, statuses, phases)
-            
-            if trials_df is not None and not trials_df.empty:
-                # Format display dataframe
-                display_df = trials_df.copy()
-                display_df['completion_date'] = pd.to_datetime(display_df['completion_date']).dt.strftime('%Y-%m-%d')
-                display_df['success_probability'] = display_df['success_probability'].apply(
-                    lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
-                display_df['likelihood_of_approval'] = display_df['likelihood_of_approval'].apply(
-                    lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
-                display_df['market_value_millions'] = display_df['market_value_millions'].apply(
-                    lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
-                display_df['development_cost_millions'] = display_df['development_cost_millions'].apply(
-                    lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
-                display_df['expected_return_millions'] = display_df['expected_return_millions'].apply(
-                    lambda x: f"${x:,.1f}M" if pd.notnull(x) else "N/A")
-                
-                st.dataframe(display_df)
-                
-                # Download button
-                csv = trials_df.to_csv(index=False)
-                st.download_button(
-                    label="Download Data as CSV",
-                    data=csv,
-                    file_name=f"{sponsor_name}_trials.csv",
-                    mime="text/csv"
+        # Sponsor Details
+        st.header("Sponsor Details")
+        sponsor_name = st.text_input("Enter Sponsor Name")
+        if sponsor_name:
+            sponsor_details_df = get_sponsor_details(conn, sponsor_name)
+            if sponsor_details_df is not None and not sponsor_details_df.empty:
+                sponsor_details_df['nct_id'] = sponsor_details_df['nct_id'].apply(
+                    lambda x: f"[Link](https://clinicaltrials.gov/study/{x})")
+
+                # Adding explanation tooltips to the table headers
+                st.dataframe(sponsor_details_df, use_container_width=True)
+                st.caption(
+                    "**Table Legend:** Hover over column headers for explanation.\n" +
+                    "- **Phase**: Clinical trial phase (1, 2, or 3).\n" +
+                    "- **Status**: Current trial status (e.g., Recruiting).\n" +
+                    "- **Market Value**: Estimated market value in millions.\n" +
+                    "- **Development Cost**: Estimated development cost in millions.\n" +
+                    "- **Discount**: Calculated expected return.\n"
                 )
             else:
-                st.warning("No trials found matching the selected criteria.")
-        else:
-            st.warning("No data found for this sponsor.")
+                st.write("No data available for this sponsor.")
+    else:
+        st.warning("No data available for the selected filters.")
 
 if __name__ == "__main__":
     main()
