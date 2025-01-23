@@ -27,10 +27,13 @@ def get_sponsor_names(conn, _):
    query = """
    SELECT DISTINCT sponsor_name 
    FROM consolidated_clinical_trials
+   WHERE sponsor_name IS NOT NULL
    ORDER BY sponsor_name;
    """
    df = execute_query(conn, query)
-   return [""] + (df['sponsor_name'].tolist() if df is not None else [])
+   if df is not None and not df.empty:
+       return [""] + [name for name in df['sponsor_name'].tolist() if name]
+   return [""]
 
 def get_sponsor_details(conn, sponsor_name, filters):
    query = """
