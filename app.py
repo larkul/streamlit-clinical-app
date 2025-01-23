@@ -53,8 +53,8 @@ def get_sponsor_details(conn, sponsor_name, filters):
     params = [f'%{sponsor_name}%']
 
     if filters.get("disease_area"):
-        query += " AND determine_disease_area(conditions) = %s"
-        params.append(filters["disease_area"])
+    query += " AND UPPER(determine_disease_area(conditions)) = %s"
+    params.append(filters["disease_area"])
 
     if filters.get("phase"):
         query += " AND phase = %s"
@@ -88,7 +88,12 @@ def main():
     st.sidebar.header("Filters")
     sponsor_name = st.text_input("Enter Sponsor Name")
 
-    disease_area = st.sidebar.selectbox("Disease Area", ["", "Oncology", "Cardiology", "Neurology"])
+   disease_area = st.sidebar.selectbox(
+    "Disease Area", 
+    ["", "ONCOLOGY", "CARDIOVASCULAR", "NEUROLOGY", "INFECTIOUS_DISEASE", 
+     "AUTOIMMUNE", "RESPIRATORY", "ENDOCRINE", "CNS", "GENITOURINARY", 
+     "METABOLIC", "RARE_DISEASES", "OPHTHALMOLOGY", "VACCINES", "OTHER"]
+)
     phase = st.sidebar.selectbox("Phase", ["", "PHASE1", "PHASE2", "PHASE3"])
     status = st.sidebar.selectbox("Status", ["", "RECRUITING", "ACTIVE", "ACTIVE_NOT_RECRUITING"])
     market_reaction = st.sidebar.selectbox("Market Reaction", ["", "Weak", "Moderate", "Strong"])
