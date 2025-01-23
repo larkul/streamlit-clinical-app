@@ -26,14 +26,13 @@ def execute_query(conn, query, params=None):
 def get_sponsor_names(conn, _):
    query = """
    SELECT DISTINCT sponsor_name 
-   FROM consolidated_clinical_trials
-   WHERE sponsor_name IS NOT NULL
+   FROM streamlit_ctmis_view
+   WHERE sponsor_name IS NOT NULL 
+   AND sponsor_name != ''
    ORDER BY sponsor_name;
    """
    df = execute_query(conn, query)
-   if df is not None and not df.empty:
-       return [""] + [name for name in df['sponsor_name'].tolist() if name]
-   return [""]
+   return [""] + (df['sponsor_name'].tolist() if df is not None else [])
 
 def get_sponsor_details(conn, sponsor_name, filters):
    query = """
@@ -50,14 +49,14 @@ def get_sponsor_details(conn, sponsor_name, filters):
        estimated_market_value/1000000 as market_value_millions,
        estimated_development_cost/1000000 as development_cost_millions,
        expected_return/1000000 as expected_return_millions
-   FROM consolidated_clinical_trials
+   FROM streamlit_ctmis_view
    WHERE LOWER(sponsor_name) LIKE LOWER(%s)
    """
 
    params = [f'%{sponsor_name}%']
 
    if filters.get("disease_area"):
-       query += " AND UPPER(determine_disease_area(conditions)) = %s"
+       query += " AND disease_area = %s"
        params.append(filters["disease_area"])
 
    if filters.get("phase"):
@@ -73,13 +72,7 @@ def get_sponsor_details(conn, sponsor_name, filters):
        params.append(filters["market_reaction"])
 
    if filters.get("has_biomarker"):
-       query += """ AND has_biomarker_indicators(
-           eligibility_criteria,
-           outcome_measures,
-           design_info,
-           biospec_retention,
-           biospec_description
-       ) = TRUE"""
+       query += " AND has_biomarker = TRUE"
 
    query += " ORDER BY completion_date DESC;"
    return execute_query(conn, query, params)
@@ -88,10 +81,8 @@ def main():
    st.title("Clinical Trials Analysis Dashboard")
    conn = init_connection()
 
-   # Sidebar Filters
    st.sidebar.header("Filters")
    
-   # Sponsor search
    sponsor_name = st.selectbox(
        "Select Sponsor",
        options=get_sponsor_names(conn, "") if conn else []
@@ -123,7 +114,6 @@ def main():
        if sponsor_details_df is not None and not sponsor_details_df.empty:
            display_df = sponsor_details_df.copy()
            
-           # Format dates and numeric columns
            display_df['completion_date'] = pd.to_datetime(display_df['completion_date']).dt.strftime('%Y-%m-%d')
            numeric_cols = ['probability_of_success', 'likelihood_of_approval', 
                          'market_value_millions', 'development_cost_millions', 'expected_return_millions']
@@ -135,14 +125,12 @@ def main():
                        else f"${x:,.1f}M" if pd.notnull(x) else "N/A"
                    )
 
-           # Make NCT ID clickable
            display_df['nct_id'] = display_df['nct_id'].apply(
                lambda x: f"[{x}](https://clinicaltrials.gov/study/{x})" if x else "N/A"
            )
 
            st.header("Sponsor Details")
 
-           # Column descriptions with tooltips
            column_descriptions = {
                'probability_of_success': "The estimated probability (%) of the trial succeeding based on historical data for similar trials in the same phase and indication.",
                'likelihood_of_approval': "The probability (%) of receiving regulatory approval, considering the current phase and therapeutic area.",
@@ -152,7 +140,6 @@ def main():
                'expected_return_millions': "Expected return in millions USD, calculated as (Market Value × Likelihood of Approval) - Development Cost"
            }
 
-           # Add help tooltips
            col1, col2 = st.columns([3, 1])
            with col1:
                st.markdown("### Column Descriptions:")
@@ -163,7 +150,6 @@ def main():
 
            st.dataframe(display_df)
 
-           # Download button
            csv = sponsor_details_df.to_csv(index=False)
            st.download_button(
                "Download Data as CSV",
