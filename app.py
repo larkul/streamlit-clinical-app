@@ -26,11 +26,11 @@ def execute_query(conn, query, params=None):
 def get_sponsor_names(conn, partial_name):
    query = """
    SELECT DISTINCT sponsor_name 
-   FROM consolidated_clinical_trials
-   WHERE LOWER(sponsor_name) LIKE LOWER(%s)
-   ORDER BY sponsor_name;
+   FROM consolidated_clinical_trials 
+   WHERE LOWER(sponsor_name) LIKE LOWER(%s) 
+   LIMIT 100;
    """
-   df = execute_query(conn, query, [f'{partial_name}%'])
+   df = execute_query(conn, query, [f'%{partial_name}%'])
    return df['sponsor_name'].tolist() if df is not None else []
 
 def get_sponsor_details(conn, sponsor_name, filters):
@@ -89,10 +89,20 @@ def main():
    # Sidebar Filters
    st.sidebar.header("Filters")
    
-   # Sponsor autocomplete
-   sponsor_input = st.text_input("Start typing sponsor name...", "")
-   matching_sponsors = get_sponsor_names(conn, sponsor_input) if sponsor_input else []
-   sponsor_name = st.selectbox("Select sponsor", [""] + matching_sponsors) if matching_sponsors else ""
+   # Sponsor search
+   col1, col2 = st.columns([2,2])
+   with col1:
+       sponsor_input = st.text_input("Start typing sponsor name...")
+   
+   if sponsor_input:
+       matching_sponsors = get_sponsor_names(conn, sponsor_input)
+       if matching_sponsors:
+           with col2:
+               sponsor_name = st.selectbox("Select sponsor", options=matching_sponsors)
+       else:
+           st.warning("No matching sponsors found")
+   else:
+       sponsor_name = None
 
    disease_area = st.sidebar.selectbox(
        "Disease Area", 
