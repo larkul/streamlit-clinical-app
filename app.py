@@ -9,7 +9,7 @@ st.set_page_config(page_title="Clinical Trial Analysis Dashboard", layout="wide"
 def init_connection():
    return psycopg2.connect(
        host=st.secrets["postgresql"]["host"],
-       port=st.secrets["postgresql"]["port"], 
+       port=st.secrets["postgresql"]["port"],
        database=st.secrets["postgresql"]["database"],
        user=st.secrets["postgresql"]["user"],
        password=st.secrets["postgresql"]["password"],
@@ -23,19 +23,14 @@ def execute_query(conn, query, params=None):
        st.error(f"Error executing query: {e}")
        return None
 
-def get_sponsor_names(conn, partial_name):
+def get_sponsor_names(conn, _):
    query = """
    SELECT DISTINCT sponsor_name 
-   FROM (
-       SELECT sponsor_name FROM consolidated_clinical_trials
-       UNION
-       SELECT sponsor_name FROM streamlit_ctmis_view
-   ) combined
-   WHERE LOWER(sponsor_name) LIKE LOWER(%s)
+   FROM consolidated_clinical_trials
    ORDER BY sponsor_name;
    """
-   df = execute_query(conn, query, [f'{partial_name}%'])
-   return df['sponsor_name'].tolist() if df is not None else []
+   df = execute_query(conn, query)
+   return [""] + (df['sponsor_name'].tolist() if df is not None else [])
 
 def get_sponsor_details(conn, sponsor_name, filters):
    query = """
@@ -94,9 +89,10 @@ def main():
    st.sidebar.header("Filters")
    
    # Sponsor search
-   sponsor_input = st.text_input("Start typing sponsor name...")
-   matching_sponsors = get_sponsor_names(conn, sponsor_input) if sponsor_input else []
-   sponsor_name = st.selectbox("Select sponsor", [""] + matching_sponsors) if matching_sponsors else ""
+   sponsor_name = st.selectbox(
+       "Select Sponsor",
+       options=get_sponsor_names(conn, "") if conn else []
+   )
 
    disease_area = st.sidebar.selectbox(
        "Disease Area", 
