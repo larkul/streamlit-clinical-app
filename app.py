@@ -37,7 +37,7 @@ def get_sponsor_details(conn, sponsor_name, filters):
         sponsor_name,
         phase,
         status,
-        determine_disease_area(conditions) as disease_area,
+        disease_area,
         completion_date,
         phase_success_probability as probability_of_success,
         likelihood_of_approval,
@@ -54,7 +54,7 @@ def get_sponsor_details(conn, sponsor_name, filters):
     params = [f'%{sponsor_name}%']
 
     if filters.get("disease_area"):
-        query += " AND determine_disease_area(conditions) = %s"
+        query += " AND disease_area = %s"
         params.append(filters["disease_area"])
 
     if filters.get("phase"):
@@ -65,16 +65,17 @@ def get_sponsor_details(conn, sponsor_name, filters):
         query += " AND status = %s"
         params.append(filters["status"])
 
-    if filters.get("market_reaction") is not None:
-        query += " AND market_reaction_strength >= %s"
+    if filters.get("market_reaction"):
+        query += " AND market_reaction_strength = %s"
         params.append(filters["market_reaction"])
 
     if filters.get("has_biomarker"):
-        query += " AND determine_biomarker(eligibility_criteria, outcome_measures) = TRUE"
+        query += " AND has_biomarker = TRUE"
 
     query += " ORDER BY completion_date ASC;"
 
     return execute_query(conn, query, params)
+
 
 def main():
     st.title("Clinical Trials Analysis Dashboard")
@@ -87,7 +88,7 @@ def main():
     disease_area = st.sidebar.selectbox("Disease Area", ["", "Oncology", "Cardiology", "Neurology"])
     phase = st.sidebar.selectbox("Phase", ["", "PHASE1", "PHASE2", "PHASE3"])
     status = st.sidebar.selectbox("Status", ["", "RECRUITING", "ACTIVE", "ACTIVE_NOT_RECRUITING"])
-    market_reaction = st.sidebar.slider("Minimum Market Reaction", 0, 100, 0)
+    market_reaction = st.sidebar.selectbox("Market Reaction", ["", "Weak", "Moderate", "Strong"])
     has_biomarker = st.sidebar.checkbox("Has Biomarker")
 
     filters = {
