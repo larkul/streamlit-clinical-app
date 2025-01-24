@@ -85,17 +85,14 @@ def main():
     st.title("Clinical Trials Analysis Dashboard")
     conn = init_connection()
 
-    # All filters in sidebar
     st.sidebar.header("Filters")
     
-    # Autocomplete text input for sponsor
     sponsor_names = get_sponsor_names(conn, "")
     sponsor_name = st.sidebar.text_input(
         "Search Sponsor",
         key="sponsor_search"
     )
     
-    # Filter sponsor names based on input
     matching_sponsors = [
         s for s in sponsor_names 
         if sponsor_name.lower() in s.lower()
@@ -145,10 +142,12 @@ def main():
             numeric_cols = ['probability_of_success', 'likelihood_of_approval', 
                           'market_value_millions', 'development_cost_millions', 'expected_return_millions']
             
+            # Convert and format numeric columns
             for col in numeric_cols:
                 if col in display_df.columns:
+                    display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
                     display_df[col] = display_df[col].apply(
-                        lambda x: f"{x:.1%}" if col in ['probability_of_success', 'likelihood_of_approval']
+                        lambda x: f"{x:.1%}" if col in ['probability_of_success', 'likelihood_of_approval'] and pd.notnull(x)
                         else f"${x:,.1f}M" if pd.notnull(x) else "N/A"
                     )
 
